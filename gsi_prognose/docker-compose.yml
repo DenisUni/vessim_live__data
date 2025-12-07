@@ -1,0 +1,43 @@
+version: '3.8'  # Docker Compose Dateiformat-Version (3.8 ist eine stabile Version)
+
+services:  # Definiert alle Container-Services, die gestartet werden sollen
+  # GSI Exporter Service
+  gsi-exporter:  # Name des Services (kann mit docker-compose commands verwendet werden)
+    build:  # Konfiguration zum Erstellen des Container-Images
+      context: .  # Build-Kontext: aktuelles Verzeichnis (hier werden Dateien für den Build gesucht)
+      dockerfile: Dockerfile  # Name der Dockerfile-Datei, die zum Bauen verwendet wird
+    container_name: gsi-exporter  # Fester Name für den Container (statt automatisch generiertem Namen)
+    restart: unless-stopped  # Container automatisch neu starten, außer er wurde manuell gestoppt
+    ports:  # Port-Mapping: Host-Port -> Container-Port
+      - "8000:8000"  # Mappe Host-Port 8000 auf Container-Port 8000 (von außen erreichbar unter localhost:8000)
+    environment:  # Umgebungsvariablen für den Container
+      - ZIP_CODE=${ZIP_CODE:-10117}  # ZIP_CODE aus .env oder System-Environment, falls nicht vorhanden Standardwert "10117"
+    networks:  # Netzwerke, denen dieser Container angehört
+      - prometheus-network  # Verbindet Container mit dem prometheus-network (für Kommunikation zwischen Containern)
+
+  # Prometheus Service
+  prometheus:  # Name des Prometheus-Services
+    image: prom/prometheus:latest  # Verwendet offizielles Prometheus-Image von Docker Hub (neueste Version)
+    container_name: prometheus  # Fester Name für den Prometheus-Container
+    restart: unless-stopped  # Container automatisch neu starten, außer er wurde manuell gestoppt
+    ports:  # Port-Mapping: Host-Port -> Container-Port
+      - "9090:9090"  # Mappe Host-Port 9090 auf Container-Port 9090 (Prometheus Web-UI unter localhost:9090)
+    volumes:  # Verzeichnisse/Dateien vom Host in den Container mounten
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml  # Mount lokale prometheus.yml in Container (für Konfiguration)
+      - prometheus-data:/prometheus  # Mount named Volume für persistente Daten (Metriken-Historie bleibt erhalten)
+    command:  # Überschreibt den Standard-Startbefehl des Images
+      - '--config.file=/etc/prometheus/prometheus.yml'  # Pfad zur Prometheus-Konfigurationsdatei
+      - '--storage.tsdb.path=/prometheus'  # Pfad wo Prometheus Metriken-Daten speichert (Time Series Database)
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'  # Pfad zu Prometheus Console Libraries
+      - '--web.console.templates=/usr/share/prometheus/consoles'  # Pfad zu Prometheus Console Templates
+    networks:  # Netzwerke, denen dieser Container angehört
+      - prometheus-network  # Verbindet Container mit dem prometheus-network (kann gsi-exporter erreichen)
+    depends_on:  # Definiert Startreihenfolge: Prometheus startet erst nach gsi-exporter
+      - gsi-exporter  # Prometheus wartet bis gsi-exporter läuft (aber nicht bis er bereit ist)
+
+networks:  # Definiert Docker-Netzwerke für Container-Kommunikation
+  prometheus-network:  # Name des Netzwerks
+    driver: bridge  # Netzwerk-Typ: Bridge (Container können sich über Container-Namen erreichen)
+
+volumes:  # Definiert persistente Datenspeicher (bleiben erhalten auch wenn Container gelöscht werden)
+  prometheus-data:  # Name des Volumes für Prometheus-Daten (wird automatisch erstellt)
