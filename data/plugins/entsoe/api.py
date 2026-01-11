@@ -7,7 +7,7 @@ import pandas as pd
 from fastapi import APIRouter
 from fastapi import Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session, select
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 
 from core.database import get_managed_session
 from .service import EntsoeService, fill_missing_timestamps
@@ -24,9 +24,55 @@ entsoe_service = EntsoeService(api_key=os.environ.get("ENTSOE_API_KEY"))
 def startup():
     """
     Perform startup checks for the ENTSO-E plugin.
+    If the API key is missing or invalid, prompt for it via terminal.
     """
     logging.info("Checking ENTSO-E API connection...")
-    entsoe_service.check_connection()
+    if not entsoe_service.check_connection():
+        logging.warning("ENTSO-E connection failed. Starting interactive setup...")
+        _interactive_setup()
+    else:
+        logging.info("✅ ENTSO-E connection verified.")
+
+def _interactive_setup():
+    """
+    Interactive terminal setup for ENTSO-E API key.
+    """
+    print("\n--- ENTSO-E Setup ---")
+    print("API key is missing or invalid.")
+    
+    while True:
+        api_key = input("Please enter your ENTSO-E API key: ").strip()
+        if not api_key:
+            print("API key cannot be empty.")
+            continue
+
+        # Test the new API key
+        temp_service = EntsoeService(api_key=api_key)
+        if temp_service.check_connection():
+            print("API key is valid!")
+            _save_credentials(api_key)
+            # Update the global service instance
+            entsoe_service.api_key = api_key
+            break
+        else:
+            print("API key is invalid. Please try again.")
+
+def _save_credentials(api_key: str):
+    """
+    Ask user if they want to save the API key to .env and do so if confirmed.
+    """
+    save = input("Do you want to save this API key to the .env file? [y/N]: ").strip().lower()
+    if save == 'y':
+        try:
+            if not os.path.exists(dotenv_path):
+                with open(dotenv_path, 'w') as f:
+                    f.write("")
+            
+            set_key(dotenv_path, "ENTSOE_API_KEY", api_key)
+            print(f"API key saved to {dotenv_path}")
+        except Exception as e:
+            logging.error(f"Failed to save API key to .env: {e}")
+            print(f"Error saving API key: {e}")
 
 
 # --- API Endpoints ---
