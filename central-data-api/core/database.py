@@ -50,7 +50,7 @@ class TimeStampedModel(SQLModel):
 
 
 # IMPORTANT: Function for FastAPI Dependency
-@contextmanager
+# @contextmanager
 def get_managed_session():
     """
     FastAPI Dependency, which provides a database session for each request.
