@@ -153,12 +153,12 @@ def check_and_install_dependencies():
 
 
 if __name__ == "__main__":
-    print(f"All loaded variables: {settings.model_dump()}")
-    print(os.getenv("TEST_VAR"))
+    logger.debug(f"Model dump variables: {settings.model_dump()}")
+    logger.debug("TEST_VAR: " + os.getenv("TEST_VAR"))
     if settings.DEBUG:
-        print(f"Starte {settings.APP_NAME} im DEBUG-Modus")
-        print(f"Host: {settings.HOST}, Port: {settings.PORT}")
-        print(f"Database: {settings.DATABASE_URL}")
+        logger.info(f"Starte {settings.APP_NAME} im DEBUG-Modus")
+        logger.info(f"Host: {settings.HOST}, Port: {settings.PORT}")
+        logger.info(f"Database: {settings.DATABASE_URL}")
 
     check_and_install_dependencies()
 
