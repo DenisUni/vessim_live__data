@@ -34,7 +34,7 @@ def startup():
         logger.warning("ENTSO-E connection failed. Starting interactive setup...")
         _interactive_setup()
     else:
-        logger.info("✅ ENTSO-E connection verified.")
+        logger.info("ENTSO-E connection verified.")
 
 
 def _interactive_setup():
