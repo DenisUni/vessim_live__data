@@ -3,14 +3,18 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 import pandas as pd
+from core.database import get_managed_session
+from core.logger import setup_logger
 from fastapi import APIRouter
+from dotenv import load_dotenv, set_key
 from fastapi import Depends, HTTPException, BackgroundTasks
 from sqlmodel import Session, select
 
-from core.database import get_managed_session
-from core.logger import setup_logger
-from .entsoe_service import EntsoeService, fill_missing_timestamps
 from .models import EntsoePrice, EntsoePriceCreate, EntsoePricePublic
+from .service import EntsoeService, fill_missing_timestamps
+
+dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
+load_dotenv(dotenv_path=dotenv_path)
 
 # Each plugin has its own router
 router = APIRouter(prefix="/entsoe", tags=["entsoe"])
@@ -23,19 +27,85 @@ logger = setup_logger(__name__, "ENTSOE-API")
 def startup():
     """
     Perform startup checks for the ENTSO-E plugin.
+    If the API key is missing or invalid, prompt for it via terminal.
     """
-    logger.info("Checking ENTSO-E API connection...")
-    entsoe_service.check_connection()
+    logging.info("Checking ENTSO-E API connection...")
+    if not entsoe_service.check_connection():
+        logging.warning("ENTSO-E connection failed. Starting interactive setup...")
+        _interactive_setup()
+    else:
+        logging.info("✅ ENTSO-E connection verified.")
+
+
+def _interactive_setup():
+    """
+    Interactive terminal setup for ENTSO-E API key.
+    """
+    print("\n--- ENTSO-E Setup ---")
+    print("API key is missing or invalid.")
+
+    while True:
+        api_key = input("Please enter your ENTSO-E API key: ").strip()
+        if not api_key:
+            print("API key cannot be empty.")
+            continue
+
+        # Test the new API key
+        temp_service = EntsoeService(api_key=api_key)
+        if temp_service.check_connection():
+            print("API key is valid!")
+            _save_credentials(api_key)
+            # Update the global service instance
+            entsoe_service.api_key = api_key
+            break
+        else:
+            print("API key is invalid. Please try again.")
+
+
+def _save_credentials(api_key: str):
+    """
+    Ask user if they want to save the API key to .env and do so if confirmed.
+    """
+    save = input("Do you want to save this API key to the .env file? [y/N]: ").strip().lower()
+    if save == 'y':
+        try:
+            if not os.path.exists(dotenv_path):
+                with open(dotenv_path, 'w') as f:
+                    f.write("")
+
+            set_key(dotenv_path, "ENTSOE_API_KEY", api_key)
+            print(f"API key saved to {dotenv_path}")
+        except Exception as e:
+            logging.error(f"Failed to save API key to .env: {e}")
+            print(f"Error saving API key: {e}")
 
 
 # --- API Endpoints ---
+
+@router.get("/")
+def get_overview():
+    """Returns an overview of available endpoints for the ENTSO-E plugin."""
+    return {
+        "message": "Welcome to the ENTSO-E API. Available endpoints:",
+        "endpoints": [
+            {"path": "/prices/", "method": "GET",
+             "description": "Retrieve ENTSO-E price data for a given zone and time range. Fetches from cache or ENTSO-E API."},
+            {"path": "/prices/", "method": "POST",
+             "description": "Manually store a single ENTSO-E price data point in the cache."},
+            {"path": "/prices/fetch-range/", "method": "POST",
+             "description": "Trigger a background task to fetch and store a range of ENTSO-E price data."},
+            {"path": "/health", "method": "GET", "description": "Check the health status of the ENTSO-E plugin."}
+        ]
+    }
+
+
 @router.post("/prices/", response_model=EntsoePricePublic)
 def create_price_entry(
         price: EntsoePriceCreate,
         session: Session = Depends(get_managed_session)
 ):
     """Store a single price data point in the cache. Useful for manual updates."""
-    db_price = EntsoePrice.from_orm(price)
+    db_price = EntsoePrice.model_validate(price)
     session.add(db_price)
     session.commit()
     session.refresh(db_price)

@@ -1,10 +1,9 @@
 from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from sqlmodel import SQLModel, create_engine, Field, Session
-
 from core.config import settings
 from core.logger import setup_logger
+from sqlmodel import SQLModel, create_engine, Field, Session
 
 logger = setup_logger(__name__, "DATABASE")
 

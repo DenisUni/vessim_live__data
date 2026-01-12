@@ -1,5 +1,4 @@
 import importlib
-import os
 import pkgutil
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -154,7 +153,6 @@ def check_and_install_dependencies():
 
 if __name__ == "__main__":
     logger.debug(f"Model dump variables: {settings.model_dump()}")
-    logger.debug("TEST_VAR: " + os.getenv("TEST_VAR"))
     if settings.DEBUG:
         logger.info(f"Starte {settings.APP_NAME} im DEBUG-Modus")
         logger.info(f"Host: {settings.HOST}, Port: {settings.PORT}")
