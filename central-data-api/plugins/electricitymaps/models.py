@@ -15,7 +15,7 @@ class ElectricityMapsCarbonIntensityBase(SQLModel):
 class ElectricityMapsCarbonIntensity(ElectricityMapsCarbonIntensityBase, table=True):
     """Database table model for storing carbon intensity data."""
     __tablename__ = "electricitymaps_carbon_intensity"
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
 
     # Unique constraint to prevent duplicate entries

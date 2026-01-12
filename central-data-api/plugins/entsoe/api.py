@@ -29,12 +29,12 @@ def startup():
     Perform startup checks for the ENTSO-E plugin.
     If the API key is missing or invalid, prompt for it via terminal.
     """
-    logging.info("Checking ENTSO-E API connection...")
+    logger.info("Checking ENTSO-E API connection...")
     if not entsoe_service.check_connection():
-        logging.warning("ENTSO-E connection failed. Starting interactive setup...")
+        logger.warning("ENTSO-E connection failed. Starting interactive setup...")
         _interactive_setup()
     else:
-        logging.info("✅ ENTSO-E connection verified.")
+        logger.info("✅ ENTSO-E connection verified.")
 
 
 def _interactive_setup():
@@ -76,7 +76,7 @@ def _save_credentials(api_key: str):
             set_key(dotenv_path, "ENTSOE_API_KEY", api_key)
             print(f"API key saved to {dotenv_path}")
         except Exception as e:
-            logging.error(f"Failed to save API key to .env: {e}")
+            logger.error(f"Failed to save API key to .env: {e}")
             print(f"Error saving API key: {e}")
 
 
