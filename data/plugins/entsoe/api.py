@@ -20,7 +20,7 @@ load_dotenv(dotenv_path=dotenv_path)
 router = APIRouter(prefix="/entsoe", tags=["entsoe"])
 
 entsoe_service = EntsoeService(api_key=os.environ.get("ENTSOE_API_KEY"))
-
+'''
 def startup():
     """
     Perform startup checks for the ENTSO-E plugin.
@@ -32,7 +32,7 @@ def startup():
         _interactive_setup()
     else:
         logging.info("✅ ENTSO-E connection verified.")
-
+'''
 def _interactive_setup():
     """
     Interactive terminal setup for ENTSO-E API key.
