@@ -308,90 +308,135 @@ def _build_cache_key(request: Request, full_path: str, body: bytes) -> str:
 
 
 
-@router.api_route(
-    "/{full_path:path}", methods=["GET"], description= "z.B.: full_path = v3/carbon-intensity/forecast?zone=FR ; full_path = v3/carbon-intensity/history?zone=FR ; full_path = v3/carbon-intensity/latest?zone=FR ")
+# --------------------------
+# Generic Proxy with Cache - Helper Functions
+# --------------------------
 
-async def proxy_any(
-    full_path: str, request: Request, session: Session = Depends(get_managed_session)):
-    
-    full_path = urllib.parse.unquote(full_path)
-
-    ### Erstellt Cache_key für DB
-    body = await request.body()
-    cache_key = _build_cache_key(request, full_path, body)
-    ###
-
-    
-    
-
-    #### Suche in der Datenbank nach einem gültigen Cache-Eintrag
-    now = datetime.now(timezone.utc)                # Hole die aktuelle UTC-Zeit für Cache-Vergleiche
-
+def _get_cached_response(session: Session, cache_key: str) -> Optional[APICache]:
+    """Sucht einen gültigen Cache-Eintrag in der Datenbank"""
+    now = datetime.now(timezone.utc)
     cached = session.exec(
-            select(APICache)                        # Wähle APICache-Tabelle
-            .where(APICache.cache_key == cache_key) # suche gleichen Cache-Key
-            .where(APICache.expires_at > now)       # Ablaufdatum soll noch nicht erreicht sein
-        ).first()                                   # Hole den ersten (und einzigen) Treffer
-    ###
-
-    ### Wenn ein gültiger Cache-Eintrag exestiert, gibt ihn aus
-    if cached:                                                   
-        return Response(                                # Gib die gecachte Response zurück
-            content=cached.response_body,
-            status_code=cached.status_code,
-            media_type="application/json"             # JSON-Media-Type
-    )
-    ###
-
-    ### Wenn ein gültiger Cache-Eintrag nicht exestiert
-    headers = dict(request.headers)
-    headers.pop("host", None)                           # Host: localhost:8000 -> Host: none
-    headers.pop("accept-encoding", None)                #Wichtige Zeile, sonst latest gibt gzip (quatsch) zurück und wir können es nicht decodieren
-
-
-    ### Mache Request an ElectricityMaps API
-    api_key = os.environ.get("ELECTRICITYMAPS_API_KEY", "")      # Hole den API-Key aus den Umgebungsvariablen
-    if api_key:                                                   # Falls ein API-Key vorhanden ist   
-        headers["auth-token"] = api_key
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-  
-        resp = await client.request(                            # Führe den Request an die ElectricityMaps API aus   
-            method=request.method,                              # mit der gleichen HTTP-Methode  
-            url=f"{ELECTRICITYMAPS_BASE_URL}/{full_path}",      # an die Basis-URL + Pfad
-            params=request.query_params,                        # mit den ursprünglichen Query-Parametern
-            headers=headers,                                    # mit den angepassten Headers
-            content=body,                                       # mit dem ursprünglichen Body-Content
-            follow_redirects=True                               # folge automatisch Redirects
-        )
-    ###
-
-    if resp.status_code != 200:
-        return Response(content= resp.text, status_code=resp.status_code, media_type="application/json")                   # Falls die ElectricityMaps API einen Server-Fehler zurückgibt
-
-    ### Suche nach gleichen Key mit abgelaufener Frist in DB und lösche ihn 
-    old_cache = session.exec(
         select(APICache)
         .where(APICache.cache_key == cache_key)
+        .where(APICache.expires_at > now)
     ).first()
- 
-    if old_cache:                                               # Falls ein alter Eintrag existiert
-        session.delete(old_cache)                               # Lösche ihn aus der Datenbank  
-    ###
+    return cached
 
-    ### Erstelle neuen Cache-Eintrag in DB
-    ttl_minutes = DEFAULT_TTL_MINUTES                           # Setze die TTL auf den Standardwert (Jeder Antrag wird derselbe Zeit gespeichert, kann danach indv. angepasst werden)
 
-    cache_entry = APICache(
-        cache_key=cache_key,                                    # mit dem berechneten Cache-Key
-        response_body=resp.text ,                               # dem Response-Body als Text
-        status_code=resp.status_code,
-        expires_at=now + timedelta(minutes=ttl_minutes)         # und einem Ablaufdatum (jetzt + TTL in Minuten)
-    )
-    session.merge(cache_entry)                                
-    session.commit()                                            # Speichere die Änderungen in der Datenbank
+def _prepare_headers(request: Request) -> dict:
+    """Bereitet die Headers für die ElectricityMaps API vor"""
+    headers = dict(request.headers)
+    headers.pop("host", None)
+    headers.pop("accept-encoding", None)
     
-    ###
+    api_key = os.environ.get("ELECTRICITYMAPS_API_KEY", "")
+    if api_key:
+        headers["auth-token"] = api_key
+    
+    return headers
 
 
-    return Response(content= resp.text, status_code=resp.status_code, media_type="application/json")
+async def _fetch_from_api(
+    full_path: str, 
+    request: Request, 
+    headers: dict, 
+    body: bytes
+) -> httpx.Response:
+    """Macht den Request an die ElectricityMaps API"""
+    
+    # Komplette URL mit Query-Parametern direkt verwenden
+    full_url = f"{ELECTRICITYMAPS_BASE_URL}/{full_path}"
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.request(
+            method=request.method,
+            url=full_url,
+            # params NICHT verwenden - sind schon in full_path
+            headers=headers,
+            content=body,
+            follow_redirects=True
+        )
+    return resp
+
+def _save_to_cache(
+    session: Session, 
+    cache_key: str, 
+    response_text: str, 
+    status_code: int,
+    ttl_minutes: int = DEFAULT_TTL_MINUTES
+) -> None:
+    """Speichert die API-Response im Cache"""
+    now = datetime.now(timezone.utc)
+    
+    # Alten Cache löschen
+    old_cache = session.exec(
+        select(APICache).where(APICache.cache_key == cache_key)
+    ).first()
+    
+    if old_cache:
+        session.delete(old_cache)
+    
+    # Neuen Cache speichern
+    cache_entry = APICache(
+        cache_key=cache_key,
+        response_body=response_text,
+        status_code=status_code,
+        expires_at=now + timedelta(minutes=ttl_minutes)
+    )
+    session.merge(cache_entry)
+    session.commit()
+
+
+@router.api_route(
+    "/{full_path:path}", 
+    methods=["GET"], 
+    description="z.B.: full_path = v3/carbon-intensity/forecast?zone=FR"
+)
+# Haupt-Proxy-Funktion
+async def proxy_any(
+    full_path: str, 
+    request: Request, 
+    session: Session = Depends(get_managed_session)
+) -> Response:
+    """Proxy mit Caching für ElectricityMaps API"""
+    
+    # 1. URL dekodieren
+    full_path = urllib.parse.unquote(full_path)
+
+    
+    # 2. Cache-Key erstellen
+    body = await request.body()
+    cache_key = _build_cache_key(request, full_path, body)
+    
+    # 3. Cache abfragen
+    cached = _get_cached_response(session, cache_key)
+    if cached:
+        return Response(
+            content=cached.response_body,
+            status_code=cached.status_code,
+            media_type="application/json"
+        )
+    
+    # 4. Headers vorbereiten
+    headers = _prepare_headers(request)
+    
+    # 5. Von API abrufen
+    resp = await _fetch_from_api(full_path, request, headers, body)
+    
+    # 6. Fehlerhafte Responses nicht cachen
+    if resp.status_code != 200:
+        return Response(
+            content=resp.text, 
+            status_code=resp.status_code, 
+            media_type="application/json"
+        )
+    
+    # 7. Im Cache speichern
+    _save_to_cache(session, cache_key, resp.text, resp.status_code)
+    
+    # 8. Response zurückgeben
+    return Response(
+        content=resp.text, 
+        status_code=resp.status_code, 
+        media_type="application/json"
+    )
