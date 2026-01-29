@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta,timezone
 from typing import List, Optional
 import gzip
+from wsgiref import headers
 import httpx
 from dotenv import load_dotenv
 from fastapi import (
@@ -290,6 +291,7 @@ def fetch_history_task(
 # --------------------------
 # Generic Proxy with Cache
 # --------------------------
+
 def _build_cache_key(request: Request, full_path: str, body: bytes) -> str:
     qs_items = sorted([f"{k}={v}" for k, v in request.query_params.multi_items()])
     qs = "&".join(qs_items)
@@ -298,76 +300,91 @@ def _build_cache_key(request: Request, full_path: str, body: bytes) -> str:
         base += full_path.lstrip("/")
     if qs:
         base += f"?{qs}"
-    # For non-GET, include body hash to distinguish different payloads
     if request.method != "GET" and body:
         body_hash = hashlib.sha256(body).hexdigest()
         base += f"#body={body_hash}"
     return base
 
+
+
 @router.api_route(
-    "/{full_path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
-)
+    "/{full_path:path}", methods=["GET"], description= "z.B.: full_path = v3/carbon-intensity/forecast?zone=FR ; full_path = v3/carbon-intensity/history?zone=FR ; full_path = v3/carbon-intensity/latest?zone=FR ")
+
 async def proxy_any(
-    full_path: str, request: Request, session: Session = Depends(get_managed_session)
-):
+    full_path: str, request: Request, session: Session = Depends(get_managed_session)):
+    
+    ### Erstellt Cache_key für DB
     body = await request.body()
     cache_key = _build_cache_key(request, full_path, body)
-    now = datetime.now(timezone.utc)  # Statt datetime.utcnow()
+    ###
+
+    
+    
+
+    #### Suche in der Datenbank nach einem gültigen Cache-Eintrag
+    now = datetime.now(timezone.utc)                # Hole die aktuelle UTC-Zeit für Cache-Vergleiche
 
     cached = session.exec(
-        select(APICache)
-        .where(APICache.cache_key == cache_key)
-        .where(APICache.expires_at > now)
-    ).first()
-    if cached:
-        return Response(
+            select(APICache)                        # Wähle APICache-Tabelle
+            .where(APICache.cache_key == cache_key) # suche gleichen Cache-Key
+            .where(APICache.expires_at > now)       # Ablaufdatum soll noch nicht erreicht sein
+        ).first()                                   # Hole den ersten (und einzigen) Treffer
+    ###
+
+    ### Wenn ein gültiger Cache-Eintrag exestiert, gibt ihn aus
+    if cached:                                                   
+        return Response(                                # Gib die gecachte Response zurück
             content=cached.response_body,
             status_code=cached.status_code,
-            media_type="application/json",
-        )
+            media_type="application/json"             # JSON-Media-Type
+    )
+    ###
 
+    ### Wenn ein gültiger Cache-Eintrag nicht exestiert
     headers = dict(request.headers)
-    headers.pop("host", None)
-    api_key = os.environ.get("ELECTRICITYMAPS_API_KEY", "")
-    if api_key:
+    headers.pop("host", None)                           # Host: localhost:8000 -> Host: none
+    headers.pop("accept-encoding", None)                #Wichtige Zeile, sonst latest gibt gzip (quatsch) zurück und wir können es nicht decodieren
+
+
+    ### Mache Request an ElectricityMaps API
+    api_key = os.environ.get("ELECTRICITYMAPS_API_KEY", "")      # Hole den API-Key aus den Umgebungsvariablen
+    if api_key:                                                   # Falls ein API-Key vorhanden ist   
         headers["auth-token"] = api_key
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.request(
-            method=request.method,
-            url=f"{ELECTRICITYMAPS_BASE_URL}/{full_path}",
-            params=request.query_params,
-            headers=headers,
-            content=body,
-            follow_redirects=True,
+        resp = await client.request(                            # Führe den Request an die ElectricityMaps API aus   
+            method=request.method,                              # mit der gleichen HTTP-Methode  
+            url=f"{ELECTRICITYMAPS_BASE_URL}/{full_path}",      # an die Basis-URL + Pfad
+            params=request.query_params,                        # mit den ursprünglichen Query-Parametern
+            headers=headers,                                    # mit den angepassten Headers
+            content=body,                                       # mit dem ursprünglichen Body-Content
+            follow_redirects=True                               # folge automatisch Redirects
         )
+    ###
 
-    # Response dekomprimieren wenn gzip
-# Response dekomprimieren wenn gzip
-# httpx dekomprimiert automatisch!
-    response_text = resp.text
-
-    # Im Cache speichern
-    # Im Cache speichern
-    ttl_minutes = DEFAULT_TTL_MINUTES
-
+    ### Suche nach gleichen Key mit abgelaufener Frist in DB und lösche ihn 
     old_cache = session.exec(
-        select(APICache).where(APICache.cache_key == cache_key)
+        select(APICache)
+        .where(APICache.cache_key == cache_key)
     ).first()
-    if old_cache:
-        session.delete(old_cache)
+ 
+    if old_cache:                                               # Falls ein alter Eintrag existiert
+        session.delete(old_cache)                               # Lösche ihn aus der Datenbank  
+    ###
+
+    ### Erstelle neuen Cache-Eintrag in DB
+    ttl_minutes = DEFAULT_TTL_MINUTES                           # Setze die TTL auf den Standardwert (Jeder Antrag wird derselbe Zeit gespeichert, kann danach indv. angepasst werden)
 
     cache_entry = APICache(
-        cache_key=cache_key,
-        response_body=response_text,
+        cache_key=cache_key,                                    # mit dem berechneten Cache-Key
+        response_body=resp.text ,                               # dem Response-Body als Text
         status_code=resp.status_code,
-        expires_at=now + timedelta(minutes=ttl_minutes),
+        expires_at=now + timedelta(minutes=ttl_minutes)         # und einem Ablaufdatum (jetzt + TTL in Minuten)
     )
-    session.add(cache_entry)
-    session.commit()
+    session.merge(cache_entry)                                
+    session.commit()                                            # Speichere die Änderungen in der Datenbank
+    
+    ###
 
-    return Response(
-        content=response_text,
-        status_code=resp.status_code,
-        media_type="application/json",
-    )
+
+    return Response(content= resp.text, status_code=resp.status_code, media_type="application/json")
