@@ -16,6 +16,7 @@ from fastapi import (
     Response,
 )
 from sqlmodel import Session, select
+import urllib
 
 from core.database import get_managed_session
 from .service import ElectricityMapsService
@@ -313,6 +314,8 @@ def _build_cache_key(request: Request, full_path: str, body: bytes) -> str:
 async def proxy_any(
     full_path: str, request: Request, session: Session = Depends(get_managed_session)):
     
+    full_path = urllib.parse.unquote(full_path)
+
     ### Erstellt Cache_key für DB
     body = await request.body()
     cache_key = _build_cache_key(request, full_path, body)
@@ -352,6 +355,7 @@ async def proxy_any(
         headers["auth-token"] = api_key
 
     async with httpx.AsyncClient(timeout=30.0) as client:
+  
         resp = await client.request(                            # Führe den Request an die ElectricityMaps API aus   
             method=request.method,                              # mit der gleichen HTTP-Methode  
             url=f"{ELECTRICITYMAPS_BASE_URL}/{full_path}",      # an die Basis-URL + Pfad
@@ -361,6 +365,9 @@ async def proxy_any(
             follow_redirects=True                               # folge automatisch Redirects
         )
     ###
+
+    if resp.status_code != 200:
+        return Response(content= resp.text, status_code=resp.status_code, media_type="application/json")                   # Falls die ElectricityMaps API einen Server-Fehler zurückgibt
 
     ### Suche nach gleichen Key mit abgelaufener Frist in DB und lösche ihn 
     old_cache = session.exec(
