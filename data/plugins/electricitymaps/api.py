@@ -31,10 +31,15 @@ load_dotenv(dotenv_path=dotenv_path)
 
 router = APIRouter(prefix="/electricitymaps", tags=["electricitymaps"])
 
+
+### For Proxy-Cache ###
 ELECTRICITYMAPS_BASE_URL = os.environ.get(
     "ELECTRICITYMAPS_BASE_URL", "https://api.electricitymap.org"
 )
 DEFAULT_TTL_MINUTES = int(os.environ.get("ELECTRICITYMAPS_CACHE_TTL_MINUTES", "15"))
+
+#######
+
 
 electricitymaps_service = ElectricityMapsService(
     api_key=os.environ.get("ELECTRICITYMAPS_API_KEY", "")
@@ -77,11 +82,12 @@ def get_overview():
                 "description": "Fetch and store historical carbon intensity data",
             },
             {"path": "/health", "method": "GET", "description": "Check plugin health"},
+            ### For Proxy-Cache ###
             {
                 "path": "/{any}/…",
                 "method": "ANY",
                 "description": "Proxy to ElectricityMaps API (cached)",
-            },
+            },######
         ],
     }
 
@@ -350,7 +356,7 @@ async def proxy_any(
     ).first()
     if old_cache:
         session.delete(old_cache)
-        
+
     cache_entry = APICache(
         cache_key=cache_key,
         response_body=response_text,

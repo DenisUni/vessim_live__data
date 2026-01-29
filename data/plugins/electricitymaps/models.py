@@ -32,6 +32,8 @@ class ElectricityMapsCarbonIntensityPublic(ElectricityMapsCarbonIntensityBase):
     id: int
 
 
+
+### New für Proxy-Cache ###
 class APICache(SQLModel, table=True):
     """Einfacher Cache für Proxy-Antworten."""
     __tablename__ = "api_cache"
