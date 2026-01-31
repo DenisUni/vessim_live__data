@@ -1,2 +1,0 @@
-pandas~=2.3.3
-entsoe-py~=0.7.8

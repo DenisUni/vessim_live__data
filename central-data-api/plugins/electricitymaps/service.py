@@ -1,8 +1,7 @@
+import logging
+import requests
 from datetime import datetime
 from typing import Optional, Dict, Any
-
-import requests
-from core.logger import setup_logger
 
 
 class ElectricityMapsService:
@@ -11,23 +10,23 @@ class ElectricityMapsService:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://api.electricitymaps.com/v3"
-        self.logger = setup_logger(__name__, "ELECTRICITYMAPS-SERVICE")
-
+        self.logger = logging.getLogger(__name__)
+        
         if not self.api_key:
-            self.logger.warning("No Electricity Maps API Key found!")
+            self.logger.warning("⚠️ No Electricity Maps API Key found!")
 
     def check_connection(self) -> bool:
         """Checks if the API key is valid and the server is reachable."""
         if not self.api_key:
             self.logger.error("Electricity Maps API key not set")
             return False
-
+        
         try:
             # Test with a simple zone query
             url = f"{self.base_url}/carbon-intensity/latest?zone=DE"
             headers = {"auth-token": self.api_key}
             response = requests.get(url, headers=headers, timeout=10)
-
+            
             if response.status_code == 200:
                 self.logger.info("Electricity Maps API connection successful")
                 return True
@@ -51,11 +50,11 @@ class ElectricityMapsService:
         try:
             url = f"{self.base_url}/carbon-intensity/latest?zone={zone}"
             headers = {"auth-token": self.api_key}
-
+            
             self.logger.info(f"Fetching latest carbon intensity for {zone}")
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
-
+            
             return response.json()
         except Exception as e:
             self.logger.error(f"Electricity Maps API error: {e}")
@@ -71,11 +70,11 @@ class ElectricityMapsService:
         try:
             url = f"{self.base_url}/carbon-intensity/forecast?zone={zone}"
             headers = {"auth-token": self.api_key}
-
+            
             self.logger.info(f"Fetching carbon intensity forecast for {zone}")
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
-
+            
             return response.json()
         except Exception as e:
             self.logger.error(f"Electricity Maps API error: {e}")
@@ -97,11 +96,11 @@ class ElectricityMapsService:
                 "start": start.isoformat(),
                 "end": end.isoformat()
             }
-
+            
             self.logger.info(f"Fetching carbon intensity history for {zone} from {start} to {end}")
             response = requests.get(url, headers=headers, params=params, timeout=30)
             response.raise_for_status()
-
+            
             return response.json()
         except Exception as e:
             self.logger.error(f"Electricity Maps API error: {e}")
