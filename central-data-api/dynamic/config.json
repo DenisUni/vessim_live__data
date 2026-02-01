@@ -1,0 +1,56 @@
+{
+  "app": {
+    "app_name": "Central Data API",
+    "app_version": "0.1.0",
+    "api_v1_str": "/api/v1",
+    "debug": true,
+    "log_folder": "logs",
+    "log_level_file": "DEBUG",
+    "log_level_console": "INFO",
+    "host": "127.0.0.1",
+    "port": 8000,
+    "db_name": "cache.db"
+  },
+  "api": {
+    "electricitymaps": {
+      "base_url": "https://api.electricitymap.org/v3",
+      "auth": {
+        "header_name": "auth-token",
+        "api_key": null
+      },
+      "default_params": {
+        "zone": "DE",
+        "granularity": "hourly"
+      },
+      "data_keys": [
+        "data",
+        "history",
+        "forecast"
+      ],
+      "time_keys": {
+        "datetime_key": "datetime",
+        "start_key": "start",
+        "end_key": "end"
+      },
+      "granularity_name": "temporalGranularity",
+      "granularity_definitions": {
+        "5_minutes": {"minutes": 5},
+        "15_minutes": {"minutes": 15},
+        "30_minutes": {"minutes": 30},
+        "hourly": {"hours": 1},
+        "daily": {"days": 1},
+        "weekly": {"weeks": 1},
+        "monthly": {"months": 1},
+        "quarterly": {"months": 3},
+        "yearly": {"years": 1}
+      }
+    },
+    "other_api": {
+      "base_url": "https://api.example.com/v1",
+      "auth": null,
+      "default_params": {
+        "lang": "de"
+      }
+    }
+  }
+}
