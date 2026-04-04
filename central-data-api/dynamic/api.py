@@ -250,6 +250,9 @@ async def dynamic_proxy(api_name: str, endpoint_path: str, request: Request):
     conn = get_db_connection()
     try:
         final_params, time_params, other_params = prepare_parameters(conf, dict(request.query_params))
+        if not conf.get("enabled"):
+            return await fetch_from_external_api(endpoint_path, api_name, conf, final_params)
+
         table_name = sanitize_table_name(api_name, endpoint_path)
         time_keys = conf.get("time_keys", {})
         datetime_key = time_keys.get("datetime_key")

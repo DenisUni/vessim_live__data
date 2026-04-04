@@ -3,16 +3,17 @@
     "app_name": "Central Data API",
     "app_version": "0.1.0",
     "api_v1_str": "/api/v1",
-    "debug": true,
+    "debug": false,
     "log_folder": "logs",
-    "log_level_file": "DEBUG",
-    "log_level_console": "INFO",
+    "log_level_file": "INFO",
+    "log_level_console": "DEBUG",
     "host": "127.0.0.1",
     "port": 8000,
     "db_name": "cache.db"
   },
   "api": {
     "electricitymaps": {
+      "enabled": true,
       "base_url": "https://api.electricitymap.org/v3",
       "auth": {
         "header_name": "auth-token",

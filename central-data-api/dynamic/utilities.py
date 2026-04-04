@@ -24,8 +24,9 @@ def load_config() -> tuple[dict, dict]:
 	return app_config, api_config
 
 def sanitize_table_name(api_name: str, endpoint_name: str) -> str:
-	clean_endpoint = endpoint_name.strip("/").replace("/", "_").replace("-", "_")
-	return f"{api_name}_{clean_endpoint}"
+	def clean_name(name: str) -> str:
+		return name.strip("/").replace("/", "_").replace("-", "_")
+	return f"{clean_name(api_name)}_{clean_name(endpoint_name)}"
 
 def get_granularity_delta(granularity_name: str, api_conf: Dict) -> relativedelta:
 	"""
