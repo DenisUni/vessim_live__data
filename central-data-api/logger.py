@@ -1,6 +1,8 @@
 import logging
 import os
 from datetime import datetime
+from typing import Optional
+
 from utilities import load_config
 
 # This pre-logger is only used for error messages before full initialization
@@ -27,16 +29,30 @@ def convert_log_level(string):
         raise KeyError
 
 
-def setup_logger(name: str, display_name: str = None, app_config: dict = {}) -> logging.Logger:
-    """Creates a configured logger"""
-    logger = logging.getLogger(name)
+def setup_logger(name: str, display_name: str = None, app_config: Optional[dict] = None) -> logging.Logger:
+    """Creates a configured logger that writes to a dated file and console."""
+    if not app_config:
+        try:
+            app_config, _ = load_config()
+        except Exception:
+            app_config = {}
 
     if display_name is None:
         display_name = name
 
+    log_level_file = convert_log_level(app_config.get("log_level_file", "INFO"))
+    log_level_console = convert_log_level(app_config.get("log_level_console", "INFO"))
+    log_folder = app_config.get("log_folder", "logs")
+
+    os.makedirs(log_folder, exist_ok=True)
+    log_filename = os.path.join(log_folder, datetime.now().strftime("%Y-%m-%d.log"))
+
+    logger = logging.getLogger(name)
+
     # Remove all existing handlers
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
+        handler.close()
 
     # Create a formatter for this logger
     formatter = logging.Formatter(
@@ -50,7 +66,7 @@ def setup_logger(name: str, display_name: str = None, app_config: dict = {}) -> 
     console_handler.setFormatter(formatter)
 
     # Create file handler
-    file_handler = logging.FileHandler(log_filename)
+    file_handler = logging.FileHandler(log_filename, encoding="utf-8")
     file_handler.setLevel(log_level_file)
     file_handler.setFormatter(formatter)
 
@@ -66,26 +82,3 @@ def setup_logger(name: str, display_name: str = None, app_config: dict = {}) -> 
 
     return logger
 
-
-# Load global settings
-app_config, api_config = load_config()
-log_level_file = convert_log_level(app_config.get("log_level_file"))
-log_level_console = convert_log_level(app_config.get("log_level_console"))
-log_folder = app_config.get("log_folder")
-
-# Create log folder
-os.makedirs(log_folder, exist_ok=True)
-log_filename = os.path.join(log_folder, datetime.now().strftime("%Y-%m-%d.log"))
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s,%(msecs)03d %(levelname)s %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.FileHandler(log_filename),
-        logging.StreamHandler()
-    ]
-)
-
-(logging.getLogger().handlers[0]).setLevel(log_level_file)
-(logging.getLogger().handlers[1]).setLevel(log_level_console)
