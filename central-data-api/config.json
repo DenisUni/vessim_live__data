@@ -13,7 +13,7 @@
   },
   "api": {
     "electricitymaps": {
-      "enabled": true,
+      "enabled": false,
       "base_url": "https://api.electricitymap.org/v3",
       "auth": {
         "header_name": "auth-token",

@@ -1,5 +1,6 @@
 import sqlite3
 import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -14,6 +15,30 @@ from dateutil import parser, relativedelta
 
 app_config = {}
 api_config = {}
+
+
+def setup_api_request_logger(app_conf: Dict[str, Any]) -> logging.Logger:
+    log_folder = app_conf.get("log_folder", "logs")
+    os.makedirs(log_folder, exist_ok=True)
+    log_filename = os.path.join(log_folder, f"{datetime.now().strftime('%Y-%m-%d')}_external_requests.log")
+
+    req_logger = logging.getLogger("API_REQUESTS")
+    if getattr(req_logger, "_cache_miss_logger_configured", False):
+        return req_logger
+
+    formatter = logging.Formatter(
+        '%(asctime)s,%(msecs)03d %(levelname)s API_REQUESTS: %(message)s',
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler = logging.FileHandler(log_filename, encoding="utf-8")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(formatter)
+
+    req_logger.addHandler(file_handler)
+    req_logger.setLevel(logging.INFO)
+    req_logger.propagate = False
+    req_logger._cache_miss_logger_configured = True
+    return req_logger
 
 # --- Helper functions ---
 
@@ -129,17 +154,17 @@ def query_cache(conn, table_name: str, other_params: Dict, time_params: Dict, ti
     cursor = conn.execute(query, values)
     return cursor.fetchall()
 
-def is_cache_complete(rows: List, time_params: Dict, final_params: Dict, conf: Dict) -> bool:
+def is_cache_complete(rows: List, time_params: Dict, final_params: Dict, conf: Dict) -> tuple(list[bool, str]):
     """Checks if the cached data is complete for the given time range."""
     if not rows:
-        return False
+        return False, "Cache is empty."
 
     time_keys = conf.get("time_keys", {})
     start_key = time_keys.get("start_key")
     end_key = time_keys.get("end_key")
 
     if not (time_keys.get("datetime_key") and start_key in time_params and end_key in time_params):
-        return True  # Not a time range query, so cache is considered complete if not empty
+        return True, "Not a time range query, cache is considered complete if not empty"   # Not a time range query, so cache is considered complete if not empty
 
     try:
         start_dt = parser.parse(time_params[start_key])
@@ -150,11 +175,9 @@ def is_cache_complete(rows: List, time_params: Dict, final_params: Dict, conf: D
         expected_rows = calculate_expected_rows(start_dt, end_dt, req_granularity, conf)
 
         if len(rows) < expected_rows:
-            logger.warning(f"Incomplete Cache ({req_granularity}): Found {len(rows)}/{expected_rows}. Fetching fresh.")
-            return False
+            return False, f"Incomplete Cache ({req_granularity}): Found {len(rows)}/{expected_rows} rows."
         else:
-            logger.info(f"Cache Complete ({req_granularity}): {len(rows)}/{expected_rows} points.")
-            return True
+            return True, f"Cache Complete ({req_granularity}): Found {len(rows)}/{expected_rows} rows."
 
     except Exception as e:
         logger.error(f"Completeness check failed: {e}")
@@ -174,12 +197,14 @@ def format_cache_response(rows: List, final_params: Dict) -> List[Dict]:
         response_data.append(item)
     return response_data
 
-async def fetch_from_external_api(endpoint_path: str, api_name: str, conf: Dict, final_params: Dict) -> Any:
+async def fetch_from_external_api(endpoint_path: str, api_name: str, conf: Dict, final_params: Dict, message: str | None = None) -> Any:
     """Fetches data from the external API."""
-    logger.info(f"Cache MISS for {api_name}/{endpoint_path}. Calling API...")
+    if message is not None: message = f" ({message})"
+    logger.info(f"Cache MISS for {api_name}/{endpoint_path}{message}")
     base_url = conf["base_url"].rstrip("/")
     clean_path = endpoint_path.lstrip("/")
     full_url = f"{base_url}/{clean_path}"
+    api_request_logger.info("GET %s | api=%s | endpoint=%s | params=%s", full_url, api_name, clean_path, final_params)
 
     headers = {}
     if conf.get("auth"):
@@ -235,6 +260,7 @@ async def app_lifespan(app: FastAPI):
 
 app_config, api_config = load_config()
 logger = setup_logger(__name__, "MAIN", app_config)
+api_request_logger = setup_api_request_logger(app_config)
 app = FastAPI(title=app_config.get("app_name"),
               version=app_config.get("app_version"),
               lifespan=app_lifespan,
@@ -251,7 +277,7 @@ async def dynamic_proxy(api_name: str, endpoint_path: str, request: Request):
     try:
         final_params, time_params, other_params = prepare_parameters(conf, dict(request.query_params))
         if not conf.get("enabled"):
-            return await fetch_from_external_api(endpoint_path, api_name, conf, final_params)
+            return await fetch_from_external_api(endpoint_path, api_name, conf, final_params, "API disabled")
 
         table_name = sanitize_table_name(api_name, endpoint_path)
         time_keys = conf.get("time_keys", {})
@@ -270,8 +296,9 @@ async def dynamic_proxy(api_name: str, endpoint_path: str, request: Request):
         rows = query_cache(conn, table_name, other_params, time_params, time_keys)
 
         # 2. Check cache completeness
-        if is_cache_complete(rows, time_params, final_params, conf):
-            logger.info(f"Cache HIT for {table_name}")
+        cache_complete, message = is_cache_complete(rows, time_params, final_params, conf)
+        if cache_complete:
+            logger.info(f"Cache HIT for {table_name} ({message})")
             response_data = format_cache_response(rows, final_params)
 
             if len(response_data) == 1 and not isinstance(response_data[0], list):
@@ -279,7 +306,7 @@ async def dynamic_proxy(api_name: str, endpoint_path: str, request: Request):
             return response_data
 
         # 3. Fetch from external API
-        api_data = await fetch_from_external_api(endpoint_path, api_name, conf, final_params)
+        api_data = await fetch_from_external_api(endpoint_path, api_name, conf, final_params, message)
 
         # 4. Process and cache
         return process_and_cache_response(conn, table_name, api_data, conf, final_params)
